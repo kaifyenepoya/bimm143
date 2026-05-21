@@ -1,0 +1,330 @@
+---
+title: "Class 14: Pathway Analysis from RNA-Seq Results"
+author: "Kaif Yenepoya (A17497464)"
+format: pdf
+toc: true
+---
+
+## Overview
+
+In this lab, we analyze RNA-seq data from the GSE37704 dataset. This experiment studies lung fibroblasts after HOXA1 knockdown. We will use DESeq2 to find differentially expressed genes, then use KEGG, Gene Ontology, and Reactome pathway analysis to understand the biological meaning of the gene expression changes.
+
+## Section 1. Differential Expression Analysis
+
+Load DESeq2.
+
+```{r, message=FALSE, warning=FALSE}
+library(DESeq2)
+```
+
+Load our data files.
+
+```{r}
+metaFile <- "GSE37704_metadata.csv"
+countFile <- "GSE37704_featurecounts.csv"
+
+colData <- read.csv(metaFile, row.names = 1)
+head(colData)
+
+countData <- read.csv(countFile, row.names = 1)
+head(countData)
+```
+
+The count data has an extra `length` column that does not match the metadata samples, so we need to remove it.
+
+## Q1. Complete the code to remove the troublesome first column from countData
+
+```{r}
+countData <- as.matrix(countData[, -1])
+head(countData)
+```
+
+I removed the first column using `-1` because the first column is the gene length column, not a sample count column.
+
+## Q2. Filter countData to exclude genes where we have 0 read count across all samples
+
+```{r}
+countData <- countData[rowSums(countData) > 0, ]
+head(countData)
+```
+
+`rowSums(countData)` adds the counts across all samples for each gene. If the row sum is 0, that gene has no reads in any sample, so it should be removed.
+
+
+## Running DESeq2
+
+Now we can set up the DESeqDataSet object and run the DESeq2 pipeline.
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = countData,
+                              colData = colData,
+                              design = ~ condition)
+
+dds <- DESeq(dds)
+
+dds
+```
+
+Get the DESeq2 results.
+
+```{r}
+res <- results(dds)
+res
+```
+
+Check the result names.
+
+```{r}
+resultsNames(dds)
+```
+
+## Q3. Call summary() on the DESeq2 results
+
+```{r}
+summary(res)
+```
+
+The summary shows how many genes are up-regulated and down-regulated at the default adjusted p-value cutoff of 0.1. This helps us quickly see that HOXA1 knockdown caused many gene expression changes.
+
+## Volcano Plot
+
+A volcano plot shows log2 fold change on the x-axis and statistical significance on the y-axis.
+
+```{r, message=FALSE, warning=FALSE}
+library(ggplot2)
+```
+
+Make a basic volcano plot.
+
+```{r}
+res_df <- as.data.frame(res)
+
+ggplot(res_df) +
+  aes(x = log2FoldChange,
+      y = -log(padj)) +
+  geom_point()
+```
+
+## Q4. Improve the volcano plot with color, axis labels, and cutoff lines
+
+```{r}
+mycols <- rep("gray", nrow(res_df))
+
+mycols[abs(res_df$log2FoldChange) > 2] <- "blue"
+
+mycols[res_df$padj > 0.01 | is.na(res_df$padj)] <- "gray"
+
+ggplot(res_df) +
+  aes(x = log2FoldChange,
+      y = -log(padj)) +
+  geom_point(color = mycols) +
+  xlab("Log2(FoldChange)") +
+  ylab("-Log(P-value)") +
+  geom_vline(xintercept = c(-2, 2)) +
+  geom_hline(yintercept = -log(0.01)) +
+  ggtitle("Volcano Plot of Differential Expression")
+```
+
+The improved volcano plot highlights genes with large fold changes and strong statistical significance. The blue points are the genes with large expression changes and low adjusted p-values, so these are like the most important genes to focus on.
+
+## Adding Gene Annotation
+
+Since the results currently only have Ensembl gene IDs, we will add gene symbols, Entrez IDs, and gene names.
+
+```{r, message=FALSE, warning=FALSE}
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+```
+
+Check the available annotation columns.
+
+```{r}
+columns(org.Hs.eg.db)
+```
+
+## Q5. Use mapIds() to add SYMBOL, ENTREZID, and GENENAME annotation
+
+```{r}
+res$symbol <- mapIds(org.Hs.eg.db,
+                     keys = row.names(res),
+                     keytype = "ENSEMBL",
+                     column = "SYMBOL",
+                     multiVals = "first")
+
+res$entrez <- mapIds(org.Hs.eg.db,
+                     keys = row.names(res),
+                     keytype = "ENSEMBL",
+                     column = "ENTREZID",
+                     multiVals = "first")
+
+res$name <- mapIds(org.Hs.eg.db,
+                   keys = row.names(res),
+                   keytype = "ENSEMBL",
+                   column = "GENENAME",
+                   multiVals = "first")
+
+head(res, 10)
+```
+
+The annotation step adds more useful gene information to the DESeq2 results. This is important because pathway analysis uses Entrez gene IDs, and gene symbols/names make the results easier to understand.
+
+## Q6. Reorder results by p-value and save them to a CSV file
+
+```{r}
+res <- res[order(res$pvalue), ]
+
+write.csv(res, file = "deseq_results.csv")
+```
+
+The results are now ordered by p-value and saved as `deseq_results.csv` in the project folder.
+
+## Section 2. Pathway Analysis
+
+Now we will use the `gage` package for KEGG pathway analysis and `pathview` to draw pathway diagrams. This helps us understand which biological pathways are changing, instead of only looking at individual genes.
+
+```{r, message=FALSE, warning=FALSE}
+library(pathview)
+library(gage)
+library(gageData)
+```
+
+Load the KEGG pathway datasets.
+
+```{r}
+data(kegg.sets.hs)
+data(sigmet.idx.hs)
+
+kegg.sets.hs <- kegg.sets.hs[sigmet.idx.hs]
+
+head(kegg.sets.hs, 3)
+```
+
+Create a named vector of fold changes. The values are the DESeq2 log2 fold changes, and the names are the Entrez gene IDs.
+
+```{r}
+foldchanges <- res$log2FoldChange
+names(foldchanges) <- res$entrez
+
+head(foldchanges)
+```
+
+Run the GAGE pathway analysis.
+
+```{r}
+keggres <- gage(foldchanges, gsets = kegg.sets.hs)
+
+attributes(keggres)
+```
+
+Look at the top down-regulated pathways.
+
+```{r}
+head(keggres$less)
+```
+
+Look at the top up-regulated pathways.
+
+```{r}
+head(keggres$greater)
+```
+
+The top down-regulated pathways are expected to include cell cycle-related pathways. This makes sense because HOXA1 is connected to cell cycle progression.
+
+Plot the Cell Cycle pathway.
+
+```{r}
+pathview(gene.data = foldchanges, pathway.id = "hsa04110")
+```
+
+Add the Cell Cycle pathway image to the report.
+
+![](hsa04110.pathview.png)
+
+## Q7. Can you do the same procedure to plot the pathview figures for the top 5 down-regulated pathways?
+
+Get the top 5 down-regulated pathways.
+
+```{r}
+down.pathways <- rownames(keggres$less)[1:5]
+down.pathways
+```
+
+Extract the 8-character KEGG pathway IDs.
+
+```{r}
+down.ids <- substr(down.pathways, start = 1, stop = 8)
+down.ids
+```
+
+Use `pathview()` to draw the top 5 down-regulated pathway figures.
+
+```{r}
+pathview(gene.data = foldchanges, pathway.id = down.ids, species = "hsa")
+```
+
+Add the pathway images to the report.
+
+![](hsa04110.pathview.png)
+
+![](hsa03030.pathview.png)
+
+![](hsa03013.pathview.png)
+
+![](hsa04114.pathview.png)
+
+![](hsa03440.pathview.png)
+
+The same procedure was used to plot the top 5 down-regulated KEGG pathways. These pathways include Cell cycle, DNA replication, RNA transport, Oocyte meiosis, and Homologous recombination. This supports the idea that HOXA1 knockdown strongly affects cell cycle and DNA replication processes.
+
+## Section 3. Gene Ontology Analysis
+
+We can also use GAGE for Gene Ontology analysis. Here we focus on Biological Process terms.
+
+```{r}
+data(go.sets.hs)
+data(go.subs.hs)
+
+gobpsets <- go.sets.hs[go.subs.hs$BP]
+```
+
+Run GAGE analysis on Biological Process GO terms.
+
+```{r}
+gobpres <- gage(foldchanges, gsets = gobpsets)
+
+lapply(gobpres, head)
+```
+
+The GO results show enriched biological processes. The down-regulated GO terms are related to M phase, organelle fission, nuclear division, mitosis, and chromosome segregation. This matches the KEGG results because both show that cell cycle and cell division processes are strongly affected by HOXA1 knockdown.
+
+## Section 4. Reactome Analysis
+
+Now we will create a plain text file of significant genes at the adjusted p-value 0.05 level. This file can be uploaded to Reactome for online pathway analysis.
+
+```{r}
+sig_genes <- res[res$padj <= 0.05 & !is.na(res$padj), "symbol"]
+
+print(paste("Total number of significant genes:", length(sig_genes)))
+
+write.table(sig_genes,
+            file = "significant_genes.txt",
+            row.names = FALSE,
+            col.names = FALSE,
+            quote = FALSE)
+```
+
+The file `significant_genes.txt` is now saved in the project folder. This file can be uploaded to Reactome.
+
+## Q8. What pathway has the most significant Entities p-value? Do the most significant pathways listed match your previous KEGG results? What factors could cause differences between the two methods?
+
+The most significant Reactome pathway is related to cell cycle regulation, especially mitotic cell cycle and DNA replication. This matches the KEGG results because KEGG also showed Cell cycle and DNA replication as top affected pathways. Differences between Reactome and KEGG can happen because they use different pathway databases, pathway definitions, gene annotations, and statistical methods.
+
+## Final Interpretation
+
+Overall, the DESeq2 results show that HOXA1 knockdown caused many gene expression changes. The pathway results strongly point toward changes in cell cycle, DNA replication, mitosis, and chromosome segregation. This supports the idea that HOXA1 is important for cell cycle progression in lung fibroblasts.
+
+## Session Information
+
+```{r}
+sessionInfo()
+```

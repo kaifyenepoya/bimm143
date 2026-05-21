@@ -1,0 +1,45 @@
+---
+title: "HW CLASS 6 (R FUNCTIONS)"
+format: pdf
+---
+
+## Q6. Generalized protein-drug interaction function
+
+
+```{r}
+# analyze_pdb_bfactors()
+# Input:
+#   pdb_id = a Protein Data Bank ID as a character string, for example "4AKE"
+#
+# What this function does / how to use it:
+#   This function reads a PDB structure, keeps only chain A alpha-carbon atoms,
+#   extracts their B-factors, and plots the B-factor profile.
+#   Example use: analyze_pdb_bfactors("4AKE")
+#
+# Output:
+#   A B-factor plot for the specified protein and the numeric B-factor vector
+#   returned invisibly.
+
+analyze_pdb_bfactors <- function(pdb_id) {
+  library(bio3d)
+  
+  pdb <- read.pdb(pdb_id)
+  pdb_chainA <- trim.pdb(pdb, chain = "A", elety = "CA")
+  b_factors <- pdb_chainA$atom$b
+  
+  plotb3(
+    b_factors,
+    sse = pdb_chainA,
+    typ = "l",
+    ylab = "B-factor",
+    main = paste("B-factor plot for", pdb_id)
+  )
+  
+  invisible(b_factors)
+}
+```
+
+```{r}
+analyze_pdb_bfactors("4AKE")
+```
+This function takes a PDB ID as input, reads the corresponding protein structure, trims chain A to alpha-carbon atoms, extracts the B-factors, and plots the B-factor profile. The output is a B-factor plot for the selected protein, and the numeric B-factor vector is returned invisibly for later analysis.

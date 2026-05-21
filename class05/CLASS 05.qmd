@@ -1,0 +1,216 @@
+---
+title: "class 5 Data Viz with ggplot 2"
+author: "Kaif (A17497464)"
+format: pdf
+toc: true
+---
+
+## Background
+
+There are many graphic systems in R for making plots and figures. These include so-called *"base R graphics* like the 'plot()' function and add on packages like **ggplot2**.
+
+lets compare how we make a simple figure with these two systems:
+
+We can use the in-built 'cars' dataset:
+
+```{r}
+head( cars )
+```
+
+```{r}
+plot(cars)
+```
+
+Befor I can use ggplot2 I need to install it on my computer.
+To do this we can use the fucntion 'install.packages("ggplot2")'
+
+> **N.B.** We never run 'install.packages()' in our quarto doc (we run it once only in our R console) as it would re-install the package every time we render it
+The main function in the **ggplot2** package is called 'ggplot()'
+
+Once installed we need to load up the pakcage into our R brain: 
+
+```{r}
+library(ggplot2)
+```
+
+```{r}
+ggplot(cars)
+```
+
+Every ggplot has at least 3 layers:
+
+- the **data** (a data.frame of the stuff we want to plot)
+- the **aes**thetics (how the data maps to the plot)
+- the **geom** layer (how we want the plot drawn, e.g. points, lines, etc.)
+
+
+```{r}
+ggplot(cars) +
+  aes(x=speed , y=dist)+
+  geom_point()
+```
+
+## Add some custom features
+
+Let's add a trend line that shows the relationship between speed and distance.
+
+```{r}
+ggplot(cars) +
+  aes(x=speed , y=dist)+
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  labs(title= "Stopping Dist Of Old Cars" ,
+       x= "Speed (MPH)" , 
+       y= "Distance (ft)")
+```
+
+```{r}
+ggplot(cars) +
+  aes(x=speed , y=dist)+
+  geom_point() +
+  geom_smooth(method= "lm", se= FALSE) +
+  theme_bw() +
+  labs(title= "Stopping Dist Of Old Cars" ,
+       x= "Speed (MPH)" , 
+       y= "Distance (ft)")
+```
+
+
+Q. Can you make the 'geom_smooth()' fucntion produce a linear straight line fit to the data and turn off the "gray" error region. 
+
+
+## Gene expression figure 
+
+Import the data to plot
+
+```{r}
+url <- "https://bioboot.github.io/bimm143_S20/class-material/up_down_expression.txt"
+genes <- read.delim(url)
+head(genes)
+```
+
+
+```{r}
+sum(genes$State == "up")
+```
+
+A useful new function in this context is the 'table()' fucntion:
+
+```{r}
+table(genes$State)
+```
+
+My first plot attempt
+
+```{r}
+ggplot(genes) +
+  aes(Condition1, Condition2, col = State) +
+  geom_point() +
+  scale_color_manual(values = c("purple", "gray", "orange")) +
+  theme_bw() +
+  labs(x = "No drug", y = "Drug",
+       title = "Expression changes upon GLP-1 inhibitor treatment")
+```
+
+
+## Going Further
+
+Here we read the famous gapminder dataset
+
+```{r}
+# File location online
+url <- "https://raw.githubusercontent.com/jennybc/gapminder/master/inst/extdata/gapminder.tsv"
+
+gapminder <- read.delim(url)
+head(gapminder)
+```
+
+Q. How many entries (i.e. rows) are in this dataset
+
+```{r}
+nrow(gapminder)
+```
+
+> Q. How many different "country" entries are in this dataset?
+
+```{r}
+length(table(gapminder$country) )
+```
+
+```{r}
+length (unique(gapminder$country))
+```
+
+Lets's make our first plot of the entire dataset:
+
+Plot of "gdpPercap" vs "lifeExp" colored by "continent"
+
+```{r}
+p <- ggplot(gapminder) +
+  aes(gdpPercap, lifeExp, col = continent) +
+  geom_point(alpha = 0.3)
+```
+
+I can add more layers to 'p'
+```{r}
+p +
+  facet_wrap(~continent)
+```
+
+Make a plot for 1977 and 2007 only (notall the years in the dataset)
+
+
+> Q. First use the **dplyr** package and the 'filter()' funtion from that package to extract the rows from the year 2007.
+
+
+
+```{r, message=FALSE, warning=FALSE}
+library(dplyr)
+```
+
+```{r}
+gap2007 <- filter(gapminder, year == 2007)
+```
+
+```{r}
+gap_77_07 <- filter(gapminder, year %in% c(1977, 2007))
+```
+
+```{r}
+table(gap_77_07$year)
+```
+
+```{r}
+ggplot(gap_77_07) +
+  aes(gdpPercap, lifeExp, col = continent) +
+  geom_point(alpha = 0.3) +
+  facet_wrap(~year)
+```
+> Q. Make a histogram of lifeExp colored by continent (try using fill=continent or "col=continent)
+> Q. Make a histogram of lifeExp faceted by continent
+
+```{r}
+ggplot(gapminder)+
+  aes(lifeExp) +
+  geom_histogram()
+```
+
+```{r}
+ggplot(gapminder) +
+  aes(lifeExp, fill = continent) +
+  geom_histogram()
+```
+```{r}
+ggplot(gapminder) +
+  aes(lifeExp) +
+  geom_histogram() +
+  facet_wrap(~continent)
+```
+
+```{r}
+ggplot(gapminder) +
+  aes(lifeExp, fill = continent) +
+  geom_histogram(alpha = 0.6, position = "identity")
+```
+

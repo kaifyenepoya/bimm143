@@ -1,0 +1,502 @@
+---
+title: "LAB 13: Transcriptomics and RNA-Seq Analysis"
+author: "Kaif Yenepoya (A17497464)"
+format: pdf
+toc: true
+---
+
+## Background
+
+Today we are doing an RNA-seq analysis on airway smooth muscle cells treated with dexamethasone. We will compare control and treated samples, calculate gene expression changes, run DESeq2, add gene annotations, and make plots to visualize the results.
+
+## Data Import
+
+Let's read the count data and metadata for this experiment.
+
+```{r}
+counts <- read.csv("airway_scaledcounts.csv", row.names = 1)
+metadata <- read.csv("airway_metadata.csv")
+```
+
+Have a wee peek:
+
+```{r}
+head(counts)
+```
+
+And the metadata that tells us what is actually in the columns of our counts object:
+
+```{r}
+head(metadata)
+```
+
+```{r}
+metadata
+```
+
+## Q1. How many genes are in this dataset?
+
+```{r}
+nrow(counts)
+```
+
+There are `38694` genes in this dataset.
+
+## Q2. How many control cell lines do we have?
+
+```{r}
+sum(metadata$dex == "control")
+```
+
+There are `4` control cell lines.
+
+```{r}
+table(metadata$dex)
+```
+
+Check that the column names of `counts` match the sample IDs in `metadata`.
+
+```{r}
+colnames(counts) == metadata$id
+```
+
+```{r}
+all(colnames(counts) == metadata$id)
+```
+
+## Toy Differential Gene Expression
+
+Find the control columns in our counts object.
+
+```{r}
+control <- metadata[metadata$dex == "control", ]
+control.counts <- counts[, control$id]
+control.mean <- rowMeans(control.counts)
+head(control.mean)
+```
+
+## Q3. How would you make the above code more robust? Is there a function that could help here?
+
+I would use `rowMeans()` instead of manually dividing by 4. This is more robust because it still works if the number of control samples changes.
+
+## Q4. Follow the same procedure for the treated samples
+
+Now do the same for the treated columns.
+
+```{r}
+treated <- metadata[metadata$dex == "treated", ]
+treated.counts <- counts[, treated$id]
+treated.mean <- rowMeans(treated.counts)
+head(treated.mean)
+```
+
+Now combine the mean counts into one data frame.
+
+```{r}
+meancounts <- data.frame(control.mean, treated.mean)
+head(meancounts)
+```
+
+Check the sum of mean counts across all genes.
+
+```{r}
+colSums(meancounts)
+```
+
+## Q5a. Create a scatter plot showing treated mean vs control mean
+
+```{r}
+plot(meancounts$control.mean, meancounts$treated.mean,
+     xlab = "Control Mean",
+     ylab = "Treated Mean",
+     main = "Treated vs Control Mean Counts")
+```
+
+## Q5b. What geom function would you use for this plot?
+
+I would use `geom_point()` because this is a scatter plot.
+
+```{r}
+library(ggplot2)
+
+ggplot(meancounts, aes(x = control.mean, y = treated.mean)) +
+  geom_point(alpha = 0.4) +
+  labs(x = "Control Mean",
+       y = "Treated Mean",
+       title = "Treated vs Control Mean Counts") +
+  theme_bw()
+```
+
+## Q6. Try plotting both axes on a log scale. What is the argument to plot() that allows you to do this?
+
+The argument is `log = "xy"` because it puts both the x-axis and y-axis on a log scale.
+
+```{r}
+plot(meancounts$control.mean, meancounts$treated.mean,
+     log = "xy",
+     xlab = "Control Mean",
+     ylab = "Treated Mean",
+     main = "Treated vs Control Mean Counts on Log Scale")
+```
+
+Now calculate log2 fold change.
+
+```{r}
+meancounts$log2fc <- log2(meancounts[, "treated.mean"] / meancounts[, "control.mean"])
+head(meancounts)
+```
+
+Remove genes with zero values because they can create `NaN`, `Inf`, or `-Inf`.
+
+```{r}
+zero.vals <- which(meancounts[, 1:2] == 0, arr.ind = TRUE)
+
+to.rm <- unique(zero.vals[, 1])
+mycounts <- meancounts[-to.rm, ]
+
+head(mycounts)
+```
+
+## Q7. What is the purpose of arr.ind in which()? Why take the first column and use unique()?
+
+The `arr.ind = TRUE` argument makes `which()` return the row and column positions of the zero values. We take the first column because it gives the row numbers, and `unique()` makes sure each gene is only removed once.
+
+Now find genes above the fold-change thresholds.
+
+```{r}
+up.ind <- mycounts$log2fc > 2
+down.ind <- mycounts$log2fc < -2
+```
+
+## Q8. How many up-regulated genes do we have at the greater than 2 fc level?
+
+```{r}
+sum(up.ind)
+```
+
+There are `250` up-regulated genes with log2 fold change greater than 2.
+
+## Q9. How many down-regulated genes do we have at the greater than 2 fc level?
+
+```{r}
+sum(down.ind)
+```
+
+There are `367` down-regulated genes with log2 fold change less than -2.
+
+## Q10. Do you trust these results? Why or why not?
+
+I do not fully trust these results because this is only a simple raw count comparison. It does not properly account for sequencing depth, variation between samples, or statistical significance, so DESeq2 is needed for a better analysis.
+
+## Setting up for DESeq2
+
+Load DESeq2.
+
+```{r, message=FALSE, warning=FALSE}
+library(DESeq2)
+```
+
+Create the DESeqDataSet object.
+
+```{r, warning=FALSE}
+dds <- DESeqDataSetFromMatrix(countData = counts,
+                              colData = metadata,
+                              design = ~ dex)
+dds
+```
+
+## Principal Component Analysis
+
+We can use PCA to see how the samples group before running the full DESeq analysis.
+
+```{r}
+vsd <- vst(dds, blind = FALSE)
+plotPCA(vsd, intgroup = c("dex"))
+```
+
+Make the PCA plot using ggplot2.
+
+```{r}
+pcaData <- plotPCA(vsd, intgroup = c("dex"), returnData = TRUE)
+head(pcaData)
+
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+ggplot(pcaData) +
+  aes(x = PC1, y = PC2, color = dex) +
+  geom_point(size = 3) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  coord_fixed() +
+  theme_bw()
+```
+
+## DESeq Analysis
+
+Run the DESeq pipeline.
+
+```{r}
+dds <- DESeq(dds)
+res <- results(dds)
+res
+```
+
+Convert the results to a data frame and preview it.
+
+```{r}
+res.df <- as.data.frame(res)
+head(res.df)
+```
+
+Summarize the DESeq results.
+
+```{r}
+summary(res)
+```
+
+Use an adjusted p-value cutoff of 0.05.
+
+```{r}
+res05 <- results(dds, alpha = 0.05)
+summary(res05)
+```
+
+Many adjusted p-values are missing because DESeq2 filters out genes with very low counts. These genes usually do not have enough expression to give reliable statistical evidence, so filtering improves the power of the analysis.
+
+## Adding Annotation Data
+
+Load annotation packages.
+
+```{r, message=FALSE, warning=FALSE}
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+```
+
+Check available annotation columns.
+
+```{r}
+columns(org.Hs.eg.db)
+```
+
+Add gene symbols.
+
+```{r}
+res$symbol <- mapIds(org.Hs.eg.db,
+                     keys = row.names(res),
+                     keytype = "ENSEMBL",
+                     column = "SYMBOL",
+                     multiVals = "first")
+
+head(res)
+```
+
+## Q11. Add Entrez ID, UniProt accession, and GENENAME
+
+```{r}
+res$entrez <- mapIds(org.Hs.eg.db,
+                     keys = row.names(res),
+                     keytype = "ENSEMBL",
+                     column = "ENTREZID",
+                     multiVals = "first")
+
+res$uniprot <- mapIds(org.Hs.eg.db,
+                      keys = row.names(res),
+                      keytype = "ENSEMBL",
+                      column = "UNIPROT",
+                      multiVals = "first")
+
+res$genename <- mapIds(org.Hs.eg.db,
+                       keys = row.names(res),
+                       keytype = "ENSEMBL",
+                       column = "GENENAME",
+                       multiVals = "first")
+
+head(res)
+```
+
+Order the results by adjusted p-value.
+
+```{r}
+ord <- order(res$padj)
+head(res[ord, ])
+```
+
+Write the ordered results to a CSV file.
+
+```{r}
+write.csv(res[ord, ], "deseq_results.csv")
+```
+
+## Volcano Plot - Data Visualization
+
+Make a basic volcano plot.
+
+```{r}
+plot(res$log2FoldChange, -log(res$padj),
+     xlab = "Log2(FoldChange)",
+     ylab = "-Log(P-value)",
+     main = "Volcano Plot")
+```
+
+This plot is not very useful because we care most about genes with very low adjusted p-values.
+
+Now add cutoff lines for log2 fold change and adjusted p-value.
+
+```{r}
+plot(res$log2FoldChange, -log(res$padj),
+     xlab = "Log2(FoldChange)",
+     ylab = "-Log(P-value)",
+     main = "Volcano Plot with Cutoffs")
+
+abline(v = c(-2, 2), col = "darkgray", lty = 2)
+abline(h = -log(0.05), col = "darkgray", lty = 2)
+```
+
+Color the genes that meet the thresholds.
+
+```{r}
+mycols <- rep("gray", nrow(res))
+mycols[abs(res$log2FoldChange) > 2] <- "red"
+
+inds <- (res$padj < 0.01) & (abs(res$log2FoldChange) > 2)
+mycols[inds] <- "blue"
+
+plot(res$log2FoldChange, -log(res$padj),
+     col = mycols,
+     xlab = "Log2(FoldChange)",
+     ylab = "-Log(P-value)",
+     main = "Colored Volcano Plot")
+
+abline(v = c(-2, 2), col = "gray", lty = 2)
+abline(h = -log(0.1), col = "gray", lty = 2)
+```
+
+The volcano plot helps show genes with both large fold changes and strong statistical significance. The blue points are the most important genes because they pass both the fold-change and p-value cutoffs.
+
+## Pathway Analysis
+
+Load the pathway analysis packages.
+
+```{r, message=FALSE, warning=FALSE}
+library(pathview)
+library(gage)
+library(gageData)
+```
+
+Load the KEGG pathway data.
+
+```{r}
+data(kegg.sets.hs)
+
+head(kegg.sets.hs, 2)
+```
+
+Create a named vector of fold changes.
+
+```{r}
+foldchanges <- res$log2FoldChange
+names(foldchanges) <- res$entrez
+
+head(foldchanges)
+```
+
+Run the GAGE pathway analysis.
+
+```{r}
+keggres <- gage(foldchanges, gsets = kegg.sets.hs)
+
+attributes(keggres)
+```
+
+Look at the first few down-regulated pathways.
+
+```{r}
+head(keggres$less, 3)
+```
+
+Look at the first few up-regulated pathways.
+
+```{r}
+head(keggres$greater, 3)
+```
+
+Plot the asthma pathway.
+
+```{r}
+pathview(gene.data = foldchanges, pathway.id = "hsa05310")
+```
+
+## Q12. Plot the pathview figures for the top 2 down-regulated pathways
+
+Get the top two down-regulated pathways.
+
+```{r}
+top2.down <- rownames(keggres$less)[1:2]
+top2.down
+```
+
+Extract the KEGG pathway IDs.
+
+```{r}
+top2.ids <- substr(top2.down, 1, 8)
+top2.ids
+```
+
+Make pathview plots for the top two down-regulated pathways.
+
+```{r}
+pathview(gene.data = foldchanges, pathway.id = top2.ids[1])
+pathview(gene.data = foldchanges, pathway.id = top2.ids[2])
+```
+![](hsa05332.pathview.png)
+
+![](hsa04940.pathview.png)
+
+
+The top two down-regulated pathways were plotted using the pathway IDs from the GAGE results.
+
+## Optional: Plotting Counts for CRISPLD2
+
+Find the CRISPLD2 gene.
+
+```{r}
+i <- grep("CRISPLD2", res$symbol)
+res[i, ]
+rownames(res[i, ])
+```
+
+Plot counts for CRISPLD2.
+
+```{r}
+plotCounts(dds, gene = "ENSG00000103196", intgroup = "dex")
+```
+
+Return the data and make a boxplot.
+
+```{r}
+d <- plotCounts(dds, gene = "ENSG00000103196", intgroup = "dex", returnData = TRUE)
+head(d)
+
+boxplot(count ~ dex, data = d,
+        xlab = "Condition",
+        ylab = "Normalized Count",
+        main = "CRISPLD2 Counts")
+```
+
+Make a ggplot version.
+
+```{r}
+ggplot(d, aes(dex, count, fill = dex)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  ggtitle("CRISPLD2") +
+  theme_bw()
+```
+
+I prefer the ggplot version because it looks cleaner, and the log scale makes the expression differences easier to compare.
+
+## Session Information
+
+```{r}
+sessionInfo()
+```
